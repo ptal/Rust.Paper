@@ -1,0 +1,11 @@
+[package]
+
+name = "paper"
+version = "0.1.0"
+authors = [ "Pierre Talbot <ptalbot@hyc.io>" ]
+
+[lib]
+
+name = "paper"
+path = "src/libpaper/lib.rs"
+crate_type = ["dylib"]
