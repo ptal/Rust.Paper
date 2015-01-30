@@ -13,4 +13,5 @@
 // limitations under the License.
 
 pub mod semantics;
+#[allow(non_snake_case)]
 pub mod IR;

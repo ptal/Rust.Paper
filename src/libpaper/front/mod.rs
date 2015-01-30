@@ -13,3 +13,4 @@
 // limitations under the License.
 
 pub mod ast;
+pub mod constraint_ast;

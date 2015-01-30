@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-enum Domain {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Domain {
   Interval(i32, i32),
   Singleton(i32)
 }
 
-enum Constraint {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Constraint {
   XEqualY(String, String),
   XNotEqualY(String, String),
   XLessThanY(String, String),

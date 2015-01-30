@@ -14,8 +14,8 @@
 
 pub struct Program<C, D>
 {
-  args: Vec<String>,
-  def: Expr<C, D>
+  pub args: Vec<String>,
+  pub def: Expr<C, D>
 }
 
 pub enum Expr<C, D>

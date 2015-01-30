@@ -16,7 +16,9 @@
 // #![experimental]
 #![crate_type = "dylib"]
 
-#![feature(rustc_private, plugin_registrar, quote, box_syntax)]
+#![feature(core, rustc_private, plugin_registrar, quote, box_syntax)]
+
+#![allow(unused_variables,dead_code)]
 
 extern crate syntax;
 extern crate rustc;

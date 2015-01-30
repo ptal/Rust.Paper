@@ -15,6 +15,7 @@
 // Temporal flow graph (TFG)
 
 use front::ast::*;
+use front::ast::Expr::*;
 
 struct Graph<C, D> {
   vertices: Vec<Vertex<C,D>>,
@@ -55,6 +56,12 @@ impl<C,D> Graph<C,D> {
     self.vertices[source].next.push(edge_id);
     edge_id
   }
+
+  fn add_seq_edge(&mut self, target: usize) -> usize {
+    let edge = Edge::new(target, vec![0]);
+    self.edges.push(edge);
+    self.edges.len() - 1
+  }
 }
 
 struct Vertex<C, D> {
@@ -62,7 +69,7 @@ struct Vertex<C, D> {
   unless: Vec<ConstraintDependentEdge<C>>,
   tell: Vec<C>,
   locals: Vec<(String, D)>,
-  next: Vec<usize>
+  next: Vec<usize> // there should only be sequential edge here (after the 'compact' step)
 }
 
 impl<C,D> Vertex<C, D> {
@@ -94,4 +101,59 @@ impl<C,D> Edge<C,D> {
 struct ConstraintDependentEdge<C> {
   c: C,
   edge: usize
+}
+
+pub fn compile_program<D,C>(program: Program<C,D>) -> Graph<C,D>
+{
+  let mut graph: Graph<C,D> = Graph {
+    vertices: vec![],
+    edges: vec![],
+    args: program.args,
+    entry: 0
+  };
+  let current_vertex_id = graph.add_empty_vertex();
+  graph.entry = compile_expr(&mut graph, program.def, current_vertex_id);
+  graph
+}
+
+// Returns the vertex id we just compiled expr into.
+pub fn compile_expr<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize) -> usize
+{
+  match expr {
+    Tell(c) => compile_tell(graph, c, current),
+    _ => panic!("unimplemented")
+  }
+}
+
+fn compile_tell<C,D>(graph: &mut Graph<C,D>, c: C, current: usize) -> usize
+{
+  graph.vertices[current].tell.push(c);
+  current
+}
+
+
+#[cfg(test)]
+mod test {
+  use super::*;
+  use front::constraint_ast::*;
+  use front::constraint_ast::Domain::*;
+  use front::constraint_ast::Constraint::*;
+  use front::ast::*;
+  use front::ast::Expr::*;
+
+  #[test]
+  fn tell_test() {
+    let p: Program<Constraint, Domain> = Program {
+      args: vec![],
+      def: Tell(make_x_eq_y())
+    };
+    let g = compile_program(p);
+    assert_eq!(g.vertices.len(), 1);
+    assert_eq!(g.edges.len(), 0);
+    assert_eq!(g.vertices[0].tell[0], make_x_eq_y());
+  }
+
+  fn make_x_eq_y() -> Constraint {
+    XEqualY(String::from_str("x"), String::from_str("y"))
+  }
 }
