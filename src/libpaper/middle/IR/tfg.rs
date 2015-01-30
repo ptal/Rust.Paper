@@ -121,6 +121,7 @@ pub fn compile_expr<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize
 {
   match expr {
     Tell(c) => compile_tell(graph, c, current),
+    Parallel(exprs) => compile_par(graph, exprs, current),
     _ => panic!("unimplemented")
   }
 }
@@ -131,6 +132,13 @@ fn compile_tell<C,D>(graph: &mut Graph<C,D>, c: C, current: usize) -> usize
   current
 }
 
+fn compile_par<C,D>(graph: &mut Graph<C,D>, exprs: Vec<Expr<C,D>>, current: usize) -> usize
+{
+  for expr in exprs.into_iter() {
+    compile_expr(graph, expr, current);
+  }
+  current
+}
 
 #[cfg(test)]
 mod test {
@@ -153,7 +161,26 @@ mod test {
     assert_eq!(g.vertices[0].tell[0], make_x_eq_y());
   }
 
+  #[test]
+  fn par_tell_test() {
+    let p: Program<Constraint, Domain> = Program {
+      args: vec![],
+      def: Parallel(vec![
+            Tell(make_x_eq_y()),
+            Tell(make_x_neq_z())])
+    };
+    let g = compile_program(p);
+    assert_eq!(g.vertices.len(), 1);
+    assert_eq!(g.edges.len(), 0);
+    assert_eq!(g.vertices[0].tell[0], make_x_eq_y());
+    assert_eq!(g.vertices[0].tell[1], make_x_neq_z());
+  }
+
   fn make_x_eq_y() -> Constraint {
     XEqualY(String::from_str("x"), String::from_str("y"))
+  }
+
+  fn make_x_neq_z() -> Constraint {
+    XLessThanY(String::from_str("x"), String::from_str("z"))
   }
 }
