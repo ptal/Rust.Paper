@@ -12,21 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub struct Program<C, D>
-{
-  args: Vec<String>,
-  def: Expr<C, D>
-}
+use front::ast::Program;
 
-pub enum Expr<C, D>
-{
-  ReactiveSum(Vec<Expr<C, D>>),
-  Parallel(Vec<Expr<C, D>>),
-  Replicate(Box<Expr<C, D>>),
-  When(C, Box<Expr<C, D>>),
-  Unless(C, Box<Expr<C, D>>),
-  Tell(C),
-  Next(Box<Expr<C, D>>),
-  Async(Box<Expr<C, D>>),
-  LetIn(String, D, Box<Expr<C, D>>)
+pub fn analyse_program<C, D>(program: Program<C, D>) {
+
 }

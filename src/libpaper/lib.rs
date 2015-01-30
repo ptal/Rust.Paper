@@ -16,8 +16,7 @@
 #![experimental]
 #![crate_type = "dylib"]
 
-#![feature(plugin_registrar, quote, box_syntax)]
-#![allow(unstable)]
+#![feature(rustc_private, plugin_registrar, quote, box_syntax)]
 
 extern crate syntax;
 extern crate rustc;
@@ -26,6 +25,9 @@ use rustc::plugin::Registry;
 use syntax::ext::base::{ExtCtxt,DummyResult,MacResult};
 use syntax::codemap::{DUMMY_SP,Span};
 use syntax::ast::TokenTree;
+
+mod front;
+mod middle;
 
 #[plugin_registrar]
 pub fn plugin_registrar(reg: &mut Registry)

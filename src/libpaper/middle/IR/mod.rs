@@ -11,22 +11,3 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-pub struct Program<C, D>
-{
-  args: Vec<String>,
-  def: Expr<C, D>
-}
-
-pub enum Expr<C, D>
-{
-  ReactiveSum(Vec<Expr<C, D>>),
-  Parallel(Vec<Expr<C, D>>),
-  Replicate(Box<Expr<C, D>>),
-  When(C, Box<Expr<C, D>>),
-  Unless(C, Box<Expr<C, D>>),
-  Tell(C),
-  Next(Box<Expr<C, D>>),
-  Async(Box<Expr<C, D>>),
-  LetIn(String, D, Box<Expr<C, D>>)
-}
