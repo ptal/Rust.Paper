@@ -21,6 +21,7 @@ pub enum Domain {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Constraint {
   XEqualY(String, String),
+  XEqualC(String, i32),
   XNotEqualY(String, String),
   XLessThanY(String, String),
 }

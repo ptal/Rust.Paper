@@ -103,6 +103,15 @@ struct ConstraintDependentEdge<C> {
   edge: usize
 }
 
+impl<C> ConstraintDependentEdge<C> {
+  pub fn new(c: C, edge: usize) -> ConstraintDependentEdge<C> {
+    ConstraintDependentEdge {
+      c: c,
+      edge: edge
+    }
+  }
+}
+
 pub fn compile_program<D,C>(program: Program<C,D>) -> Graph<C,D>
 {
   let mut graph: Graph<C,D> = Graph {
@@ -122,8 +131,32 @@ pub fn compile_expr<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize
   match expr {
     Tell(c) => compile_tell(graph, c, current),
     Parallel(exprs) => compile_par(graph, exprs, current),
+    ReactiveSum(whens) => compile_reactive_sum(graph, whens, current),
     _ => panic!("unimplemented")
+    // Replicate(Box<Expr<C, D>>),
+    // When(C, Box<Expr<C, D>>),
+    // Unless(C, Box<Expr<C, D>>),
+    // Next(Box<Expr<C, D>>),
+    // Async(Box<Expr<C, D>>),
   }
+}
+
+fn compile_reactive_sum<C,D>(graph: &mut Graph<C,D>, whens: Vec<Expr<C,D>>, current: usize) -> usize
+{
+  let mut sum = vec![];
+  for when in whens.into_iter() {
+    match when {
+      When(c, expr) => {
+        let empty_vertex = graph.add_empty_vertex();
+        let cexpr = compile_expr(graph, *expr, empty_vertex);
+        let seq_edge_id = graph.add_seq_edge(cexpr);
+        sum.push(ConstraintDependentEdge::new(c, seq_edge_id));
+      }
+      _ => panic!("The sugar P + P' instead of when true -> P + when true -> P' is not yet supported.")
+    }
+  }
+  graph.vertices[current].sums.push(sum);
+  current
 }
 
 fn compile_tell<C,D>(graph: &mut Graph<C,D>, c: C, current: usize) -> usize
@@ -158,6 +191,7 @@ mod test {
     let g = compile_program(p);
     assert_eq!(g.vertices.len(), 1);
     assert_eq!(g.edges.len(), 0);
+    assert_eq!(g.vertices[0].tell.len(), 1);
     assert_eq!(g.vertices[0].tell[0], make_x_eq_y());
   }
 
@@ -172,8 +206,36 @@ mod test {
     let g = compile_program(p);
     assert_eq!(g.vertices.len(), 1);
     assert_eq!(g.edges.len(), 0);
+    assert_eq!(g.vertices[0].tell.len(), 2);
     assert_eq!(g.vertices[0].tell[0], make_x_eq_y());
     assert_eq!(g.vertices[0].tell[1], make_x_neq_z());
+  }
+
+  #[test]
+  fn when_tell_test() {
+    let p: Program<Constraint, Domain> = Program {
+      args: vec![],
+      def: ReactiveSum(vec![
+            When(make_x_eq_0(), box Tell(make_x_eq_y())),
+            When(make_x_eq_1(), box Tell(make_x_neq_z()))])
+    };
+    let g = compile_program(p);
+    assert_eq!(g.vertices.len(), 3);
+    assert_eq!(g.vertices[0].tell.len(), 0);
+    assert_eq!(g.vertices[1].tell.len(), 1);
+    assert_eq!(g.vertices[2].tell.len(), 1);
+    assert_eq!(g.vertices[1].tell[0], make_x_eq_y());
+    assert_eq!(g.vertices[2].tell[0], make_x_neq_z());
+
+    assert_eq!(g.vertices[0].sums.len(), 1);
+    assert_eq!(g.vertices[0].sums[0].len(), 2);
+    assert_eq!(g.vertices[0].sums[0][0].c, make_x_eq_0());
+    assert_eq!(g.vertices[0].sums[0][1].c, make_x_eq_1());
+
+    assert_eq!(g.edges.len(), 2);
+    assert_eq!(g.edges[0].delays, vec![0]);
+    assert_eq!(g.edges[0].target, 1);
+    assert_eq!(g.edges[1].target, 2);
   }
 
   fn make_x_eq_y() -> Constraint {
@@ -182,5 +244,13 @@ mod test {
 
   fn make_x_neq_z() -> Constraint {
     XLessThanY(String::from_str("x"), String::from_str("z"))
+  }
+
+  fn make_x_eq_0() -> Constraint {
+    XEqualC(String::from_str("x"), 0)
+  }
+
+  fn make_x_eq_1() -> Constraint {
+    XEqualC(String::from_str("x"), 1)
   }
 }
