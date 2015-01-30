@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![crate_name = "paper"]
-#![experimental]
+// #![experimental]
 #![crate_type = "dylib"]
 
 #![feature(rustc_private, plugin_registrar, quote, box_syntax)]
