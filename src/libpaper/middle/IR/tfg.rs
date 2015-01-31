@@ -52,17 +52,19 @@ impl<C,D> Graph<C,D> {
   }
 
   fn add_edge(&mut self, source: usize, target: usize, delays: Vec<u32>) -> usize {
-    let edge = Edge::new(target, delays);
-    self.edges.push(edge);
-    let edge_id = self.edges.len() - 1;
+    let edge_id = self.add_temporal_edge(target, delays);
     self.vertices[source].next.push(edge_id);
     edge_id
   }
 
-  fn add_seq_edge(&mut self, target: usize) -> usize {
-    let edge = Edge::new(target, vec![0]);
+  fn add_temporal_edge(&mut self, target: usize, delays: Vec<u32>) -> usize {
+    let edge = Edge::new(target, delays);
     self.edges.push(edge);
     self.edges.len() - 1
+  }
+
+  fn add_seq_edge(&mut self, target: usize) -> usize {
+    self.add_temporal_edge(target, vec![0])
   }
 }
 
@@ -122,83 +124,88 @@ pub fn compile_program<D,C>(program: Program<C,D>) -> Graph<C,D>
     args: program.args,
     entry: 0
   };
-  let current_vertex_id = graph.add_empty_vertex();
-  graph.entry = compile_expr(&mut graph, program.def, current_vertex_id);
+  graph.entry = graph.add_empty_vertex();
+  let current = graph.entry;
+  compile_expr(&mut graph, program.def, current);
   graph
 }
 
 // Returns the vertex id we just compiled expr into.
-pub fn compile_expr<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize) -> usize
+pub fn compile_expr<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize)
 {
   match expr {
     Tell(c) => compile_tell(graph, c, current),
     Parallel(exprs) => compile_par(graph, exprs, current),
     when@When(_,_) => compile_reactive_sum(graph, vec![when], current),
     ReactiveSum(whens) => compile_reactive_sum(graph, whens, current),
+    Unless(c, expr) => compile_unless(graph, c, *expr, current),
     LetIn(v, dom, expr) => compile_let_in(graph, v, dom, *expr, current),
     Next(expr) => compile_next(graph, *expr, 1, current),
     _ => panic!("unimplemented")
     // Replicate(Box<Expr<C, D>>),
-    // Unless(C, Box<Expr<C, D>>),
     // Next(Box<Expr<C, D>>),
     // Async(Box<Expr<C, D>>),
   }
 }
 
-fn compile_tell<C,D>(graph: &mut Graph<C,D>, c: C, current: usize) -> usize
+fn compile_tell<C,D>(graph: &mut Graph<C,D>, c: C, current: usize)
 {
   graph.vertices[current].tell.push(c);
-  current
 }
 
-fn compile_par<C,D>(graph: &mut Graph<C,D>, exprs: Vec<Expr<C,D>>, current: usize) -> usize
+fn compile_par<C,D>(graph: &mut Graph<C,D>, exprs: Vec<Expr<C,D>>, current: usize)
 {
   for expr in exprs.into_iter() {
     compile_expr(graph, expr, current);
   }
-  current
 }
 
-fn compile_reactive_sum<C,D>(graph: &mut Graph<C,D>, whens: Vec<Expr<C,D>>, current: usize) -> usize
+fn compile_reactive_sum<C,D>(graph: &mut Graph<C,D>, whens: Vec<Expr<C,D>>, current: usize)
 {
   let mut sum = vec![];
   for when in whens.into_iter() {
     match when {
       When(c, expr) => {
-        let empty_vertex = graph.add_empty_vertex();
-        let cexpr = compile_expr(graph, *expr, empty_vertex);
-        let seq_edge_id = graph.add_seq_edge(cexpr);
+        let target_id = graph.add_empty_vertex();
+        compile_expr(graph, *expr, target_id);
+        let seq_edge_id = graph.add_seq_edge(target_id);
         sum.push(ConstraintDependentEdge::new(c, seq_edge_id));
       }
       _ => panic!("The sugar P + P' instead of when true -> P + when true -> P' is not yet supported.")
     }
   }
   graph.vertices[current].sums.push(sum);
-  current
 }
 
 // Note: it must has previously been alpha-renamed, so two occurrences of the name v
 // inside a node is impossible.
-fn compile_let_in<C,D>(graph: &mut Graph<C,D>, v: String, dom: D, expr: Expr<C,D>, current: usize) -> usize
+fn compile_let_in<C,D>(graph: &mut Graph<C,D>, v: String, dom: D, expr: Expr<C,D>, current: usize)
 {
   graph.vertices[current].locals.push((v, dom));
   compile_expr(graph, expr, current);
-  current
 }
 
-fn compile_next<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, delay: u32, current: usize) -> usize
+fn compile_next<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, delay: u32, current: usize)
 {
   match expr {
     Next(expr) => {
       compile_next(graph, *expr, delay+1, current)
     }
     expr => {
-      let empty_vertex = graph.add_empty_vertex();
-      let target_id = compile_expr(graph, expr, empty_vertex);
+      let target_id = graph.add_empty_vertex();
+      compile_expr(graph, expr, target_id);
       graph.add_delay_on(current, target_id, delay);
-      current
     }
   }
+}
+
+fn compile_unless<C,D>(graph: &mut Graph<C,D>, c: C, expr: Expr<C,D>, current: usize)
+{
+  let target_id = graph.add_empty_vertex();
+  let edge_id = graph.add_seq_edge(target_id);
+  compile_next(graph, expr, 1, target_id);
+  let unless_edge = ConstraintDependentEdge::new(c, edge_id);
+  graph.vertices[current].unless.push(unless_edge);
 }
 
 #[cfg(test)]
@@ -408,8 +415,6 @@ mod test {
   || next next next {x = 0}
   || {x = 1} || next {x = 1}
   */
-  // TODO: the edge between `when {x = 0}` and `next {x != z}` is
-  //   compacted, an empty vertex is created.
   #[test]
   fn next_test() {
     let e =
@@ -452,6 +457,38 @@ mod test {
     // next {x = 1}
     assert_eq!(g.edges[4].delays, vec![1]);
     assert_eq!(g.edges[4].target, 5);
+  }
+
+  /*
+     par
+     || unless {x = y} next {x = 1}
+     || unless {x != z} next next {x = 0}
+  */
+  #[test]
+  fn unless_test() {
+    let e = Parallel(vec![
+      Unless(make_x_eq_y(), box Tell(make_x_eq_1())),
+      Unless(make_x_neq_z(), box Next(box Tell(make_x_eq_0())))]);
+    let p: Program<Constraint, Domain> = Program {
+      args: vec![],
+      def: e
+    };
+    let g = compile_program(p);
+    assert_eq!(g.vertices.len(), 5);
+    assert_eq!(g.vertices[0].unless.len(), 2);
+    assert_eq!(g.vertices[0].unless[0].c, make_x_eq_y());
+    assert_eq!(g.vertices[0].unless[0].edge, 0);
+    assert_eq!(g.vertices[0].unless[1].c, make_x_neq_z());
+    assert_eq!(g.vertices[0].unless[1].edge, 2);
+
+    assert_eq!(g.vertices[2].tell.len(), 1);
+    assert_eq!(g.vertices[4].tell.len(), 1);
+
+    assert_eq!(g.edges.len(), 4);
+    assert_eq!(g.edges[1].target, 2);
+    assert_eq!(g.edges[1].delays, vec![1]);
+    assert_eq!(g.edges[3].target, 4);
+    assert_eq!(g.edges[3].delays, vec![2]);
   }
 
   fn make_x_eq_y() -> Constraint {
