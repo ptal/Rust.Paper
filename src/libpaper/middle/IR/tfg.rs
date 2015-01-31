@@ -14,10 +14,12 @@
 
 // Temporal flow graph (TFG)
 
+// TODO: two types to distinguish vertex and edge indexes.
+
 use front::ast::*;
 use front::ast::Expr::*;
 
-struct Graph<C, D> {
+pub struct Graph<C, D> {
   vertices: Vec<Vertex<C,D>>,
   edges: Vec<Edge<C,D>>,
   args: Vec<String>,
@@ -64,7 +66,7 @@ impl<C,D> Graph<C,D> {
   }
 }
 
-struct Vertex<C, D> {
+pub struct Vertex<C, D> {
   sums: Vec<Vec<ConstraintDependentEdge<C>>>,
   unless: Vec<ConstraintDependentEdge<C>>,
   tell: Vec<C>,
@@ -84,7 +86,7 @@ impl<C,D> Vertex<C, D> {
   }
 }
 
-struct Edge<C,D> {
+pub struct Edge<C,D> {
   target: usize,
   delays: Vec<u32>
 }
@@ -98,7 +100,7 @@ impl<C,D> Edge<C,D> {
   }
 }
 
-struct ConstraintDependentEdge<C> {
+pub struct ConstraintDependentEdge<C> {
   c: C,
   edge: usize
 }
@@ -131,14 +133,29 @@ pub fn compile_expr<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize
   match expr {
     Tell(c) => compile_tell(graph, c, current),
     Parallel(exprs) => compile_par(graph, exprs, current),
+    when@When(_,_) => compile_reactive_sum(graph, vec![when], current),
     ReactiveSum(whens) => compile_reactive_sum(graph, whens, current),
     _ => panic!("unimplemented")
     // Replicate(Box<Expr<C, D>>),
-    // When(C, Box<Expr<C, D>>),
     // Unless(C, Box<Expr<C, D>>),
     // Next(Box<Expr<C, D>>),
     // Async(Box<Expr<C, D>>),
+    // LetIn(String, D, Box<Expr<C, D>>)
   }
+}
+
+fn compile_tell<C,D>(graph: &mut Graph<C,D>, c: C, current: usize) -> usize
+{
+  graph.vertices[current].tell.push(c);
+  current
+}
+
+fn compile_par<C,D>(graph: &mut Graph<C,D>, exprs: Vec<Expr<C,D>>, current: usize) -> usize
+{
+  for expr in exprs.into_iter() {
+    compile_expr(graph, expr, current);
+  }
+  current
 }
 
 fn compile_reactive_sum<C,D>(graph: &mut Graph<C,D>, whens: Vec<Expr<C,D>>, current: usize) -> usize
@@ -159,19 +176,6 @@ fn compile_reactive_sum<C,D>(graph: &mut Graph<C,D>, whens: Vec<Expr<C,D>>, curr
   current
 }
 
-fn compile_tell<C,D>(graph: &mut Graph<C,D>, c: C, current: usize) -> usize
-{
-  graph.vertices[current].tell.push(c);
-  current
-}
-
-fn compile_par<C,D>(graph: &mut Graph<C,D>, exprs: Vec<Expr<C,D>>, current: usize) -> usize
-{
-  for expr in exprs.into_iter() {
-    compile_expr(graph, expr, current);
-  }
-  current
-}
 
 #[cfg(test)]
 mod test {
@@ -236,6 +240,95 @@ mod test {
     assert_eq!(g.edges[0].delays, vec![0]);
     assert_eq!(g.edges[0].target, 1);
     assert_eq!(g.edges[1].target, 2);
+  }
+
+  #[test]
+  fn par_when_test() {
+    let p: Program<Constraint, Domain> = Program {
+      args: vec![],
+      def: Parallel(vec![
+            ReactiveSum(vec![
+              When(make_x_eq_0(), box Tell(make_x_eq_y())),
+              When(make_x_eq_1(), box Tell(make_x_neq_z()))]),
+            When(make_x_eq_y(), box Tell(make_x_neq_z())),
+            When(make_x_neq_z(), box Tell(make_x_eq_y()))])
+    };
+    let g = compile_program(p);
+    assert_eq!(g.vertices.len(), 5);
+    assert_eq!(g.vertices[0].sums.len(), 3);
+    assert_eq!(g.vertices[0].sums[0].len(), 2);
+    assert_eq!(g.vertices[0].sums[1].len(), 1);
+    assert_eq!(g.vertices[0].sums[2].len(), 1);
+
+    assert_eq!(g.edges.len(), 4);
+    assert_eq!(g.edges[0].target, 1);
+    // test the When alone.
+    assert_eq!(g.edges[3].target, 4);
+    assert_eq!(g.edges[3].delays, vec![0]);
+  }
+
+  fn nested_par_equiv(expr: Expr<Constraint, Domain>) {
+    let p: Program<Constraint, Domain> = Program {
+      args: vec![],
+      def: expr
+    };
+    let g = compile_program(p);
+    assert_eq!(g.vertices.len(), 3);
+    assert_eq!(g.edges.len(), 2);
+    assert_eq!(g.vertices[0].sums.len(), 2);
+    assert_eq!(g.vertices[0].tell.len(), 2);
+    assert_eq!(g.edges[0].target, 1);
+    assert_eq!(g.edges[1].target, 2);
+  }
+
+  #[test]
+  fn nested_par_test_1() {
+    let e = Parallel(vec![
+              When(make_x_eq_0(), box Tell(make_x_neq_z())),
+              When(make_x_eq_1(), box Tell(make_x_eq_y())),
+              Tell(make_x_eq_0()),
+              Tell(make_x_eq_1())]);
+    nested_par_equiv(e);
+  }
+
+  #[test]
+  fn nested_par_test_2() {
+    let e = Parallel(vec![
+              Parallel(vec![
+                When(make_x_eq_0(), box Tell(make_x_neq_z())),
+                When(make_x_eq_1(), box Tell(make_x_eq_y()))]),
+              Tell(make_x_eq_0()),
+              Tell(make_x_eq_1())]);
+    nested_par_equiv(e);
+  }
+
+  #[test]
+  fn nested_par_test_3() {
+    let e = Parallel(vec![
+              Parallel(vec![
+                When(make_x_eq_0(), box Tell(make_x_neq_z())),
+                When(make_x_eq_1(), box Tell(make_x_eq_y()))]),
+              Parallel(vec![
+                Tell(make_x_eq_0()),
+                Tell(make_x_eq_1())])]);
+    nested_par_equiv(e);
+  }
+
+  #[test]
+  fn nested_par_test_4() {
+    let e = Parallel(vec![
+              Parallel(vec![
+                When(make_x_eq_0(), box Tell(make_x_neq_z())),
+                When(make_x_eq_1(), box Tell(make_x_eq_y()))]),
+              Parallel(vec![
+                Parallel(vec![Tell(make_x_eq_0())]),
+                Parallel(vec![Tell(make_x_eq_1())])])]);
+    nested_par_equiv(e);
+  }
+
+  #[test]
+  fn whenwhen_test() {
+
   }
 
   fn make_x_eq_y() -> Constraint {
