@@ -135,12 +135,12 @@ pub fn compile_expr<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize
     Parallel(exprs) => compile_par(graph, exprs, current),
     when@When(_,_) => compile_reactive_sum(graph, vec![when], current),
     ReactiveSum(whens) => compile_reactive_sum(graph, whens, current),
+    LetIn(v, dom, expr) => compile_let_in(graph, v, dom, *expr, current),
     _ => panic!("unimplemented")
     // Replicate(Box<Expr<C, D>>),
     // Unless(C, Box<Expr<C, D>>),
     // Next(Box<Expr<C, D>>),
     // Async(Box<Expr<C, D>>),
-    // LetIn(String, D, Box<Expr<C, D>>)
   }
 }
 
@@ -176,6 +176,14 @@ fn compile_reactive_sum<C,D>(graph: &mut Graph<C,D>, whens: Vec<Expr<C,D>>, curr
   current
 }
 
+// Note: it must have previously been alpha-renamed, so two occurrences of the name v
+// inside a node is impossible.
+fn compile_let_in<C,D>(graph: &mut Graph<C,D>, v: String, dom: D, expr: Expr<C,D>, current: usize) -> usize
+{
+  graph.vertices[current].locals.push((v, dom));
+  compile_expr(graph, expr, current);
+  current
+}
 
 #[cfg(test)]
 mod test {
@@ -244,14 +252,17 @@ mod test {
 
   #[test]
   fn par_when_test() {
+    let e =
+      Parallel(vec![
+        ReactiveSum(vec![
+          When(make_x_eq_0(), box Tell(make_x_eq_y())),
+          When(make_x_eq_1(), box Tell(make_x_neq_z()))]),
+        When(make_x_eq_y(), box Tell(make_x_neq_z())),
+        When(make_x_neq_z(), box Tell(make_x_eq_y()))]);
+
     let p: Program<Constraint, Domain> = Program {
       args: vec![],
-      def: Parallel(vec![
-            ReactiveSum(vec![
-              When(make_x_eq_0(), box Tell(make_x_eq_y())),
-              When(make_x_eq_1(), box Tell(make_x_neq_z()))]),
-            When(make_x_eq_y(), box Tell(make_x_neq_z())),
-            When(make_x_neq_z(), box Tell(make_x_eq_y()))])
+      def: e
     };
     let g = compile_program(p);
     assert_eq!(g.vertices.len(), 5);
@@ -283,67 +294,114 @@ mod test {
 
   #[test]
   fn nested_par_test_1() {
-    let e = Parallel(vec![
-              When(make_x_eq_0(), box Tell(make_x_neq_z())),
-              When(make_x_eq_1(), box Tell(make_x_eq_y())),
-              Tell(make_x_eq_0()),
-              Tell(make_x_eq_1())]);
+    let e =
+      Parallel(vec![
+        When(make_x_eq_0(), box Tell(make_x_neq_z())),
+        When(make_x_eq_1(), box Tell(make_x_eq_y())),
+        Tell(make_x_eq_0()),
+        Tell(make_x_eq_1())]);
+
     nested_par_equiv(e);
   }
 
   #[test]
   fn nested_par_test_2() {
-    let e = Parallel(vec![
-              Parallel(vec![
-                When(make_x_eq_0(), box Tell(make_x_neq_z())),
-                When(make_x_eq_1(), box Tell(make_x_eq_y()))]),
-              Tell(make_x_eq_0()),
-              Tell(make_x_eq_1())]);
+    let e =
+      Parallel(vec![
+        Parallel(vec![
+          When(make_x_eq_0(), box Tell(make_x_neq_z())),
+          When(make_x_eq_1(), box Tell(make_x_eq_y()))]),
+        Tell(make_x_eq_0()),
+        Tell(make_x_eq_1())]);
+
     nested_par_equiv(e);
   }
 
   #[test]
   fn nested_par_test_3() {
-    let e = Parallel(vec![
-              Parallel(vec![
-                When(make_x_eq_0(), box Tell(make_x_neq_z())),
-                When(make_x_eq_1(), box Tell(make_x_eq_y()))]),
-              Parallel(vec![
-                Tell(make_x_eq_0()),
-                Tell(make_x_eq_1())])]);
+    let e =
+      Parallel(vec![
+        Parallel(vec![
+          When(make_x_eq_0(), box Tell(make_x_neq_z())),
+          When(make_x_eq_1(), box Tell(make_x_eq_y()))]),
+        Parallel(vec![
+          Tell(make_x_eq_0()),
+          Tell(make_x_eq_1())])]);
+
     nested_par_equiv(e);
   }
 
   #[test]
   fn nested_par_test_4() {
-    let e = Parallel(vec![
-              Parallel(vec![
-                When(make_x_eq_0(), box Tell(make_x_neq_z())),
-                When(make_x_eq_1(), box Tell(make_x_eq_y()))]),
-              Parallel(vec![
-                Parallel(vec![Tell(make_x_eq_0())]),
-                Parallel(vec![Tell(make_x_eq_1())])])]);
+    let e =
+      Parallel(vec![
+        Parallel(vec![
+          When(make_x_eq_0(), box Tell(make_x_neq_z())),
+          When(make_x_eq_1(), box Tell(make_x_eq_y()))]),
+        Parallel(vec![
+          Parallel(vec![Tell(make_x_eq_0())]),
+          Parallel(vec![Tell(make_x_eq_1())])])]);
+
     nested_par_equiv(e);
   }
 
   #[test]
-  fn whenwhen_test() {
+  fn nested_par_when_test_5() {
+    let e = Parallel(vec![
+              ReactiveSum(vec![When(make_x_eq_0(), box Tell(make_x_neq_z()))]),
+              ReactiveSum(vec![When(make_x_eq_1(), box Tell(make_x_eq_y()))]),
+              Tell(make_x_eq_0()),
+              Tell(make_x_eq_1())]);
+    nested_par_equiv(e);
+  }
 
+  fn nested_letin_equiv(expr: Expr<Constraint, Domain>) {
+    let p: Program<Constraint, Domain> = Program {
+      args: vec![],
+      def: expr
+    };
+    let g = compile_program(p);
+    assert_eq!(g.vertices.len(), 2);
+    assert_eq!(g.vertices[0].locals.len(), 2);
+    assert_eq!(g.vertices[0].locals[0], (x_name(), Singleton(1)));
+    assert_eq!(g.vertices[0].locals[1], (y_name(), Singleton(1)));
+    assert_eq!(g.vertices[0].tell.len(), 0);
+    assert_eq!(g.vertices[1].locals.len(), 1);
+    assert_eq!(g.vertices[1].locals[0], (z_name(), Interval(1,2)));
+    assert_eq!(g.vertices[1].tell.len(), 1);
+    assert_eq!(g.edges.len(), 1);
+    assert_eq!(g.edges[0].target, 1);
+  }
+
+  #[test]
+  fn letin_test_1() {
+    let e =
+      LetIn(x_name(), Singleton(1), box
+      LetIn(y_name(), Singleton(1), box
+      When(make_x_eq_y(), box
+        LetIn(z_name(), Interval(1, 2), box
+        Tell(make_x_neq_z())))));
+
+    nested_letin_equiv(e);
   }
 
   fn make_x_eq_y() -> Constraint {
-    XEqualY(String::from_str("x"), String::from_str("y"))
+    XEqualY(x_name(), y_name())
   }
 
   fn make_x_neq_z() -> Constraint {
-    XLessThanY(String::from_str("x"), String::from_str("z"))
+    XLessThanY(x_name(), z_name())
   }
 
   fn make_x_eq_0() -> Constraint {
-    XEqualC(String::from_str("x"), 0)
+    XEqualC(x_name(), 0)
   }
 
   fn make_x_eq_1() -> Constraint {
-    XEqualC(String::from_str("x"), 1)
+    XEqualC(x_name(), 1)
   }
+
+  fn x_name() -> String { String::from_str("x") }
+  fn y_name() -> String { String::from_str("y") }
+  fn z_name() -> String { String::from_str("z") }
 }
