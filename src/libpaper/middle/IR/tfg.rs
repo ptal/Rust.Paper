@@ -19,8 +19,10 @@
 use front::ast::*;
 use front::ast::Expr::*;
 use std::rand;
+use std::iter::FromIterator;
 
 pub const MAX_BOUND_DELAY: u32 = 10;
+pub const BOUNDED_REP_MAX: u32 = 100;
 
 pub struct Graph<C, D> {
   vertices: Vec<Vertex<C,D>>,
@@ -35,12 +37,17 @@ impl<C,D> Graph<C,D> {
     self.vertices.len() - 1
   }
 
-  fn add_delay_on(&mut self, source: usize, target: usize, delay: u32) -> usize {
+  fn add_delay_on(&mut self, source: usize, target: usize, delay: u32) {
+    self.add_delays_on(source, target, vec![delay]);
+  }
+
+  fn add_delays_on(&mut self, source: usize, target: usize, delays: Vec<u32>) {
     match self.find_edge(source, target) {
-      None => self.add_edge(source, target, vec![delay]),
+      None => {
+        self.add_edge(source, target, delays);
+      },
       Some(edge_id) => {
-        self.edges[edge_id].delays.push(delay);
-        edge_id
+        self.edges[edge_id].delays.push_all(delays.as_slice());
       }
     }
   }
@@ -145,8 +152,7 @@ pub fn compile_expr<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize
     LetIn(v, dom, expr) => compile_let_in(graph, v, dom, *expr, current),
     Next(expr) => compile_next(graph, *expr, 1, current),
     Async(expr) => compile_async(graph, *expr, current),
-    _ => panic!("unimplemented")
-    // Replicate(Box<Expr<C, D>>),
+    Replicate(expr) => compile_rep(graph, *expr, current),
   }
 }
 
@@ -214,6 +220,15 @@ fn compile_async<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize)
 {
   let bounded_delay = rand::random::<u32>() % MAX_BOUND_DELAY;
   compile_next(graph, expr, bounded_delay, current);
+}
+
+fn compile_rep<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize)
+{
+  let target_id = graph.add_empty_vertex();
+  graph.add_delay_on(current, target_id, 0);
+  compile_expr(graph, expr, target_id);
+  graph.add_delays_on(target_id, target_id,
+    FromIterator::from_iter(range(1, BOUNDED_REP_MAX)));
 }
 
 #[cfg(test)]
@@ -528,6 +543,33 @@ mod test {
     assert_eq!(g.edges[1].delays.len(), 1);
     assert!(g.edges[1].delays[0] >= MAX_BOUND_DELAY);
     assert!(g.edges[1].delays[0] < MAX_BOUND_DELAY*2);
+  }
+
+  #[test]
+  fn rep_test() {
+    let e = Parallel(vec![
+      Replicate(box Tell(make_x_eq_1())),
+      Replicate(box Next(box Tell(make_x_eq_0())))]);
+    let p: Program<Constraint, Domain> = Program {
+      args: vec![],
+      def: e
+    };
+    let g = compile_program(p);
+    assert_eq!(g.vertices.len(), 4);
+    assert_eq!(g.vertices[0].next.len(), 2);
+    assert_eq!(g.vertices[0].next[0], 0);
+    assert_eq!(g.vertices[0].next[1], 2);
+
+    assert_eq!(g.vertices[1].tell.len(), 1);
+    assert_eq!(g.vertices[2].tell.len(), 0);
+    assert_eq!(g.vertices[3].tell.len(), 1);
+
+    assert_eq!(g.edges.len(), 5);
+    assert_eq!(g.edges[1].delays.len(), (BOUNDED_REP_MAX - 1) as usize);
+    assert_eq!(g.edges[4].delays.len(), (BOUNDED_REP_MAX - 1) as usize);
+    assert_eq!(g.edges[0].delays, vec![0]);
+    assert_eq!(g.edges[2].delays, vec![0]);
+    assert_eq!(g.edges[3].delays, vec![1]);
   }
 
   fn make_x_eq_y() -> Constraint {

@@ -16,7 +16,7 @@
 // #![experimental]
 #![crate_type = "dylib"]
 
-#![feature(core, rand, rustc_private, plugin_registrar, quote, box_syntax)]
+#![feature(core, rand, collections, rustc_private, plugin_registrar, quote, box_syntax)]
 
 #![allow(unused_variables,dead_code)]
 
