@@ -18,6 +18,9 @@
 
 use front::ast::*;
 use front::ast::Expr::*;
+use std::rand;
+
+pub const MAX_BOUND_DELAY: u32 = 10;
 
 pub struct Graph<C, D> {
   vertices: Vec<Vertex<C,D>>,
@@ -141,10 +144,9 @@ pub fn compile_expr<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize
     Unless(c, expr) => compile_unless(graph, c, *expr, current),
     LetIn(v, dom, expr) => compile_let_in(graph, v, dom, *expr, current),
     Next(expr) => compile_next(graph, *expr, 1, current),
+    Async(expr) => compile_async(graph, *expr, current),
     _ => panic!("unimplemented")
     // Replicate(Box<Expr<C, D>>),
-    // Next(Box<Expr<C, D>>),
-    // Async(Box<Expr<C, D>>),
   }
 }
 
@@ -206,6 +208,12 @@ fn compile_unless<C,D>(graph: &mut Graph<C,D>, c: C, expr: Expr<C,D>, current: u
   compile_next(graph, expr, 1, target_id);
   let unless_edge = ConstraintDependentEdge::new(c, edge_id);
   graph.vertices[current].unless.push(unless_edge);
+}
+
+fn compile_async<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize)
+{
+  let bounded_delay = rand::random::<u32>() % MAX_BOUND_DELAY;
+  compile_next(graph, expr, bounded_delay, current);
 }
 
 #[cfg(test)]
@@ -489,6 +497,37 @@ mod test {
     assert_eq!(g.edges[1].delays, vec![1]);
     assert_eq!(g.edges[3].target, 4);
     assert_eq!(g.edges[3].delays, vec![2]);
+  }
+
+  #[test]
+  fn async_test() {
+    let mut max_bound_next = box Tell(make_x_eq_0());
+    for i in range(0,MAX_BOUND_DELAY) {
+      max_bound_next = box Next(max_bound_next);
+    }
+    let e = Parallel(vec![
+      Async(box Tell(make_x_eq_1())),
+      Async(max_bound_next)]);
+    let p: Program<Constraint, Domain> = Program {
+      args: vec![],
+      def: e
+    };
+    let g = compile_program(p);
+    assert_eq!(g.vertices.len(), 3);
+    assert_eq!(g.vertices[0].next.len(), 2);
+
+    assert_eq!(g.vertices[1].tell.len(), 1);
+    assert_eq!(g.vertices[2].tell.len(), 1);
+
+    assert_eq!(g.edges.len(), 2);
+    assert_eq!(g.edges[0].target, 1);
+    assert_eq!(g.edges[0].delays.len(), 1);
+    assert!(g.edges[0].delays[0] < 10);
+
+    assert_eq!(g.edges[1].target, 2);
+    assert_eq!(g.edges[1].delays.len(), 1);
+    assert!(g.edges[1].delays[0] >= MAX_BOUND_DELAY);
+    assert!(g.edges[1].delays[0] < MAX_BOUND_DELAY*2);
   }
 
   fn make_x_eq_y() -> Constraint {
