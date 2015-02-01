@@ -14,8 +14,6 @@
 
 // Temporal flow graph (TFG)
 
-// TODO: two types to distinguish vertex and edge indexes.
-
 use front::ast::*;
 use front::ast::Expr::*;
 use std::rand;

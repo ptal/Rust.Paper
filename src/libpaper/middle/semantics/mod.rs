@@ -14,6 +14,8 @@
 
 use front::ast::Program;
 
+pub mod symbol_table;
+
 pub fn analyse_program<C, D>(program: Program<C, D>) {
 
 }
