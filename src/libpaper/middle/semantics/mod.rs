@@ -15,7 +15,7 @@
 use front::ast::Program;
 
 pub mod symbol_table;
-// pub mod alpha_conversion;
+pub mod alpha_conversion;
 
 pub fn analyse_program<C, D>(program: Program<C, D>) {
 

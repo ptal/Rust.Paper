@@ -100,6 +100,15 @@ impl Index<str> for SymbolTable {
 }
 
 
+impl Index<String> for SymbolTable {
+    type Output = u32;
+
+    #[inline]
+    fn index<'a>(&'a self, index: &String) -> &'a u32 {
+        self.expect(index.as_slice(), format!("{} is not in scope.", index).as_slice())
+    }
+}
+
 #[cfg(test)]
 mod test {
   use super::*;
@@ -108,8 +117,6 @@ mod test {
   fn shadow_test()
   {
     let mut sym_table = SymbolTable::new();
-    let mut v = vec![1,2];
-    assert_eq!(v[0], 1);
     assert_eq!(sym_table.get("a"), None);
     assert_eq!(sym_table.shadow(name("a")), 0);
     assert_eq!(sym_table.get("a"), Some(&0));
@@ -173,7 +180,7 @@ mod test {
   #[test]
   fn index_expect_test()
   {
-    let mut sym_table = SymbolTable::new();
+    let sym_table = SymbolTable::new();
     sym_table[*"a"];
   }
 
