@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::ops::Index;
 
 pub struct SymbolTable
 {
@@ -32,13 +33,21 @@ impl SymbolTable
     }
   }
 
-  pub fn id_of_name(&self, name: String) -> Option<u32>
+  pub fn get<'a>(&'a self, name: &str) -> Option<&'a u32>
   {
-    match self.sym_to_id.get(&name) {
+    match self.sym_to_id.get(name) {
       None => None,
       Some(v) =>
         if v.is_empty() { None }
-        else { Some(v[v.len()-1]) }
+        else { Some(&v[v.len()-1]) }
+    }
+  }
+
+  pub fn expect<'a>(&'a self, name: &str, err_msg: &str) -> &'a u32
+  {
+    match self.get(name) {
+      None => panic!("{}", err_msg),
+      Some(id) => id
     }
   }
 
@@ -81,6 +90,15 @@ impl SymbolTable
   }
 }
 
+impl Index<str> for SymbolTable {
+    type Output = u32;
+
+    #[inline]
+    fn index<'a>(&'a self, index: &str) -> &'a u32 {
+        self.expect(index, format!("{} is not in scope.", index).as_slice())
+    }
+}
+
 
 #[cfg(test)]
 mod test {
@@ -90,14 +108,16 @@ mod test {
   fn shadow_test()
   {
     let mut sym_table = SymbolTable::new();
-    assert_eq!(sym_table.id_of_name(name("a")), None);
+    let mut v = vec![1,2];
+    assert_eq!(v[0], 1);
+    assert_eq!(sym_table.get("a"), None);
     assert_eq!(sym_table.shadow(name("a")), 0);
-    assert_eq!(sym_table.id_of_name(name("a")), Some(0));
+    assert_eq!(sym_table.get("a"), Some(&0));
     assert_eq!(sym_table.shadow(name("a")), 1);
-    assert_eq!(sym_table.id_of_name(name("a")), Some(1));
+    assert_eq!(sym_table[*"a"], 1);
     assert_eq!(sym_table.shadow(name("b")), 2);
-    assert_eq!(sym_table.id_of_name(name("b")), Some(2));
-    assert_eq!(sym_table.id_of_name(name("c")), None);
+    assert_eq!(sym_table[*"b"], 2);
+    assert_eq!(sym_table.get("c"), None);
 
     assert_eq!(sym_table.names_in_scope_len(), 2);
     assert_eq!(sym_table.names_currently_used_len(), 3);
@@ -114,19 +134,19 @@ mod test {
     assert_eq!(sym_table.names_in_scope_len(), 2);
     assert_eq!(sym_table.names_currently_used_len(), 3);
 
-    assert_eq!(sym_table.id_of_name(name("a")), Some(1));
+    assert_eq!(sym_table[*"a"], 1);
     sym_table.unshadow(name("a"));
-    assert_eq!(sym_table.id_of_name(name("a")), Some(0));
+    assert_eq!(sym_table[*"a"], 0);
     assert_eq!(sym_table.names_in_scope_len(), 2);
     assert_eq!(sym_table.names_currently_used_len(), 2);
 
     sym_table.unshadow(name("a"));
-    assert_eq!(sym_table.id_of_name(name("a")), None);
+    assert_eq!(sym_table.get("a"), None);
     assert_eq!(sym_table.names_in_scope_len(), 1);
     assert_eq!(sym_table.names_currently_used_len(), 1);
 
     sym_table.unshadow(name("b"));
-    assert_eq!(sym_table.id_of_name(name("b")), None);
+    assert_eq!(sym_table.get("b"), None);
     assert_eq!(sym_table.names_in_scope_len(), 0);
     assert_eq!(sym_table.names_currently_used_len(), 0);
   }
@@ -147,6 +167,14 @@ mod test {
     sym_table.shadow(name("a"));
     sym_table.unshadow(name("a"));
     sym_table.unshadow(name("a"));
+  }
+
+  #[should_fail]
+  #[test]
+  fn index_expect_test()
+  {
+    let mut sym_table = SymbolTable::new();
+    sym_table[*"a"];
   }
 
   fn name(v: &str) -> String { String::from_str(v) }
