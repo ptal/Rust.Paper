@@ -14,8 +14,8 @@
 
 // Temporal flow graph (TFG)
 
-use front::ast::*;
-use front::ast::Expr::*;
+use middle::semantics::alpha_conversion::{AProgram, AExpr};
+use middle::semantics::alpha_conversion::AExpr::*;
 use std::rand;
 use std::iter::FromIterator;
 
@@ -25,7 +25,7 @@ pub const BOUNDED_REP_MAX: u32 = 100;
 pub struct Graph<C, D> {
   vertices: Vec<Vertex<C,D>>,
   edges: Vec<Edge<C,D>>,
-  args: Vec<String>,
+  args: Vec<u32>,
   entry: usize
 }
 
@@ -80,7 +80,7 @@ pub struct Vertex<C, D> {
   sums: Vec<Vec<ConstraintDependentEdge<C>>>,
   unless: Vec<ConstraintDependentEdge<C>>,
   tell: Vec<C>,
-  locals: Vec<(String, D)>,
+  locals: Vec<(u32, D)>,
   next: Vec<usize> // there should only be sequential edge here (after the 'compact' step)
 }
 
@@ -124,7 +124,7 @@ impl<C> ConstraintDependentEdge<C> {
   }
 }
 
-pub fn compile_program<D,C>(program: Program<C,D>) -> Graph<C,D>
+pub fn compile_program<D,C>(program: AProgram<C,D>) -> Graph<C,D>
 {
   let mut graph: Graph<C,D> = Graph {
     vertices: vec![],
@@ -138,8 +138,7 @@ pub fn compile_program<D,C>(program: Program<C,D>) -> Graph<C,D>
   graph
 }
 
-// Returns the vertex id we just compiled expr into.
-pub fn compile_expr<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize)
+pub fn compile_expr<C,D>(graph: &mut Graph<C,D>, expr: AExpr<C,D>, current: usize)
 {
   match expr {
     Tell(c) => compile_tell(graph, c, current),
@@ -159,14 +158,14 @@ fn compile_tell<C,D>(graph: &mut Graph<C,D>, c: C, current: usize)
   graph.vertices[current].tell.push(c);
 }
 
-fn compile_par<C,D>(graph: &mut Graph<C,D>, exprs: Vec<Expr<C,D>>, current: usize)
+fn compile_par<C,D>(graph: &mut Graph<C,D>, exprs: Vec<AExpr<C,D>>, current: usize)
 {
   for expr in exprs.into_iter() {
     compile_expr(graph, expr, current);
   }
 }
 
-fn compile_reactive_sum<C,D>(graph: &mut Graph<C,D>, whens: Vec<Expr<C,D>>, current: usize)
+fn compile_reactive_sum<C,D>(graph: &mut Graph<C,D>, whens: Vec<AExpr<C,D>>, current: usize)
 {
   let mut sum = vec![];
   for when in whens.into_iter() {
@@ -185,13 +184,13 @@ fn compile_reactive_sum<C,D>(graph: &mut Graph<C,D>, whens: Vec<Expr<C,D>>, curr
 
 // Note: it must has previously been alpha-renamed, so two occurrences of the name v
 // inside a node is impossible.
-fn compile_let_in<C,D>(graph: &mut Graph<C,D>, v: String, dom: D, expr: Expr<C,D>, current: usize)
+fn compile_let_in<C,D>(graph: &mut Graph<C,D>, v: u32, dom: D, expr: AExpr<C,D>, current: usize)
 {
   graph.vertices[current].locals.push((v, dom));
   compile_expr(graph, expr, current);
 }
 
-fn compile_next<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, delay: u32, current: usize)
+fn compile_next<C,D>(graph: &mut Graph<C,D>, expr: AExpr<C,D>, delay: u32, current: usize)
 {
   match expr {
     Next(expr) => {
@@ -205,7 +204,7 @@ fn compile_next<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, delay: u32, curren
   }
 }
 
-fn compile_unless<C,D>(graph: &mut Graph<C,D>, c: C, expr: Expr<C,D>, current: usize)
+fn compile_unless<C,D>(graph: &mut Graph<C,D>, c: C, expr: AExpr<C,D>, current: usize)
 {
   let target_id = graph.add_empty_vertex();
   let edge_id = graph.add_seq_edge(target_id);
@@ -214,13 +213,13 @@ fn compile_unless<C,D>(graph: &mut Graph<C,D>, c: C, expr: Expr<C,D>, current: u
   graph.vertices[current].unless.push(unless_edge);
 }
 
-fn compile_async<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize)
+fn compile_async<C,D>(graph: &mut Graph<C,D>, expr: AExpr<C,D>, current: usize)
 {
   let bounded_delay = rand::random::<u32>() % MAX_BOUND_DELAY;
   compile_next(graph, expr, bounded_delay, current);
 }
 
-fn compile_rep<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize)
+fn compile_rep<C,D>(graph: &mut Graph<C,D>, expr: AExpr<C,D>, current: usize)
 {
   let target_id = graph.add_empty_vertex();
   graph.add_delay_on(current, target_id, 0);
@@ -232,15 +231,15 @@ fn compile_rep<C,D>(graph: &mut Graph<C,D>, expr: Expr<C,D>, current: usize)
 #[cfg(test)]
 mod test {
   use super::*;
-  use front::constraint_ast::*;
+  use middle::semantics::alpha_conversion::{AConstraint, AProgram, AExpr};
+  use middle::semantics::alpha_conversion::AConstraint::*;
+  use middle::semantics::alpha_conversion::AExpr::*;
+  use front::constraint_ast::Domain;
   use front::constraint_ast::Domain::*;
-  use front::constraint_ast::Constraint::*;
-  use front::ast::*;
-  use front::ast::Expr::*;
 
   #[test]
   fn tell_test() {
-    let p: Program<Constraint, Domain> = Program {
+    let p: AProgram<AConstraint, Domain> = AProgram {
       args: vec![],
       def: Tell(make_x_eq_y())
     };
@@ -253,7 +252,7 @@ mod test {
 
   #[test]
   fn par_tell_test() {
-    let p: Program<Constraint, Domain> = Program {
+    let p: AProgram<AConstraint, Domain> = AProgram {
       args: vec![],
       def: Parallel(vec![
             Tell(make_x_eq_y()),
@@ -269,7 +268,7 @@ mod test {
 
   #[test]
   fn when_tell_test() {
-    let p: Program<Constraint, Domain> = Program {
+    let p: AProgram<AConstraint, Domain> = AProgram {
       args: vec![],
       def: ReactiveSum(vec![
             When(make_x_eq_0(), box Tell(make_x_eq_y())),
@@ -304,7 +303,7 @@ mod test {
         When(make_x_eq_y(), box Tell(make_x_neq_z())),
         When(make_x_neq_z(), box Tell(make_x_eq_y()))]);
 
-    let p: Program<Constraint, Domain> = Program {
+    let p: AProgram<AConstraint, Domain> = AProgram {
       args: vec![],
       def: e
     };
@@ -322,8 +321,8 @@ mod test {
     assert_eq!(g.edges[3].delays, vec![0]);
   }
 
-  fn nested_par_equiv(expr: Expr<Constraint, Domain>) {
-    let p: Program<Constraint, Domain> = Program {
+  fn nested_par_equiv(expr: AExpr<AConstraint, Domain>) {
+    let p: AProgram<AConstraint, Domain> = AProgram {
       args: vec![],
       def: expr
     };
@@ -400,8 +399,8 @@ mod test {
     nested_par_equiv(e);
   }
 
-  fn nested_letin_equiv(expr: Expr<Constraint, Domain>) {
-    let p: Program<Constraint, Domain> = Program {
+  fn nested_letin_equiv(expr: AExpr<AConstraint, Domain>) {
+    let p: AProgram<AConstraint, Domain> = AProgram {
       args: vec![],
       def: expr
     };
@@ -446,7 +445,7 @@ mod test {
         Parallel(vec![
           Tell(make_x_eq_1()),
           Next(box Tell(make_x_eq_1()))])]);
-    let p: Program<Constraint, Domain> = Program {
+    let p: AProgram<AConstraint, Domain> = AProgram {
       args: vec![],
       def: e
     };
@@ -490,7 +489,7 @@ mod test {
     let e = Parallel(vec![
       Unless(make_x_eq_y(), box Tell(make_x_eq_1())),
       Unless(make_x_neq_z(), box Next(box Tell(make_x_eq_0())))]);
-    let p: Program<Constraint, Domain> = Program {
+    let p: AProgram<AConstraint, Domain> = AProgram {
       args: vec![],
       def: e
     };
@@ -521,7 +520,7 @@ mod test {
     let e = Parallel(vec![
       Async(box Tell(make_x_eq_1())),
       Async(max_bound_next)]);
-    let p: Program<Constraint, Domain> = Program {
+    let p: AProgram<AConstraint, Domain> = AProgram {
       args: vec![],
       def: e
     };
@@ -548,7 +547,7 @@ mod test {
     let e = Parallel(vec![
       Replicate(box Tell(make_x_eq_1())),
       Replicate(box Next(box Tell(make_x_eq_0())))]);
-    let p: Program<Constraint, Domain> = Program {
+    let p: AProgram<AConstraint, Domain> = AProgram {
       args: vec![],
       def: e
     };
@@ -570,23 +569,23 @@ mod test {
     assert_eq!(g.edges[3].delays, vec![1]);
   }
 
-  fn make_x_eq_y() -> Constraint {
-    XEqualY(x_name(), y_name())
+  fn make_x_eq_y() -> AConstraint {
+    XEqualY(0, 1)
   }
 
-  fn make_x_neq_z() -> Constraint {
-    XLessThanY(x_name(), z_name())
+  fn make_x_neq_z() -> AConstraint {
+    XLessThanY(0,2)
   }
 
-  fn make_x_eq_0() -> Constraint {
-    XEqualC(x_name(), 0)
+  fn make_x_eq_0() -> AConstraint {
+    XEqualC(0, 0)
   }
 
-  fn make_x_eq_1() -> Constraint {
-    XEqualC(x_name(), 1)
+  fn make_x_eq_1() -> AConstraint {
+    XEqualC(0, 1)
   }
 
-  fn x_name() -> String { String::from_str("x") }
-  fn y_name() -> String { String::from_str("y") }
-  fn z_name() -> String { String::from_str("z") }
+  fn x_name() -> u32 { 0 }
+  fn y_name() -> u32 { 1 }
+  fn z_name() -> u32 { 2 }
 }

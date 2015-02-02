@@ -63,7 +63,7 @@ pub enum AExpr<C, D>
   LetIn(u32, D, Box<AExpr<C, D>>)
 }
 
-fn alpha_conversion<C, D>(program: Program<C,D>)
+pub fn alpha_conversion<C, D>(program: Program<C,D>)
   -> AProgram<<C as AlphaConversion>::TargetAST, D>
   where C: AlphaConversion
 {
